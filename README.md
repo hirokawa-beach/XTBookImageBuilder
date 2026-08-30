@@ -92,7 +92,7 @@ sudo apt install python3-tk
 ネットワーク処理を始める前に、`config.toml`の`user_agent`を変更してください。Wikimediaの方針により、実在するメールアドレス、連絡用Webページ、またはwiki userを含む専用User-Agentが必要です。
 
 ```toml
-user_agent = "JawikiImgBuilderBot/0.1 (https://example.org/contact; operator@example.org) requests/2"
+user_agent = "XTbookImgBuilderBot/0.1 (https://example.org/contact; operator@example.org) requests/2"
 ```
 
 サンプルの`example.invalid`が残っている場合、ツールはネットワーク処理を開始しません。
