@@ -1,0 +1,9 @@
+work/
+config.toml
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.research-*/
+tools/MkXTBWikiplexus-src/
+tools/MkImageComplex-bin
+

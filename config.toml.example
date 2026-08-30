@@ -1,0 +1,19 @@
+[jawikiimg]
+# Wikimedia policy requires a real way to contact the operator. Network commands
+# refuse the placeholder below. Example:
+# user_agent = "JawikiImgBuilderBot/0.1 (https://example.org/contact; you@example.org) requests/2"
+user_agent = "JawikiImgBuilderBot/0.1 (https://example.invalid/replace-with-real-contact) requests/2"
+api_url = "https://ja.wikipedia.org/w/api.php"
+dump_base_url = "https://dumps.wikimedia.org/jawiki"
+api_requests_per_second = 2.0
+api_batch_size = 10
+media_workers = 2
+media_mbps = 20.0
+convert_workers = 2
+minimum_free_gib = 2.0
+thumbnail_width = 960
+jpeg_quality = 85
+max_width = 800
+max_height = 480
+# mkimagecomplex_bin = "/usr/local/bin/MkImageComplex-bin"
+
