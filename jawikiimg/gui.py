@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 from .config import Settings
 from .control import Control, StopRequested
 from .pipeline import Pipeline
+from .progress import format_duration, format_progress
 
 
 class App(ttk.Frame):
@@ -24,7 +25,7 @@ class App(ttk.Frame):
         self.review_page = 0
         self.values = {key: tk.StringVar(value="-") for key in (
             "snapshot", "found", "metadata", "allow", "review", "deny", "download",
-            "convert", "api_rate", "dl_rate", "disk", "current",
+            "convert", "api_rate", "dl_rate", "disk", "stage_progress", "eta", "current",
         )}
         self.limit = tk.StringVar(value="100")
         self._build()
@@ -50,7 +51,8 @@ class App(ttk.Frame):
             ("metadata", "metadata"), ("ALLOW", "allow"), ("REVIEW", "review"),
             ("DENY", "deny"), ("ダウンロード", "download"), ("JPEG変換", "convert"),
             ("API速度", "api_rate"), ("DL速度", "dl_rate"),
-            ("ディスク空き", "disk"), ("現在の処理", "current"),
+            ("ディスク空き", "disk"), ("ステージ進捗", "stage_progress"),
+            ("残り目安", "eta"),
         ]
         for index, (label, key) in enumerate(labels):
             row, column = divmod(index, 3)
@@ -58,16 +60,31 @@ class App(ttk.Frame):
             ttk.Label(status, textvariable=self.values[key], width=24).grid(
                 row=row, column=column * 2 + 1, sticky="w", padx=4, pady=2
             )
+        detail_row = (len(labels) + 2) // 3
+        self.progressbar = ttk.Progressbar(status, maximum=100, mode="determinate")
+        self.progressbar.grid(row=detail_row, column=0, columnspan=6, sticky="ew", padx=4, pady=(8, 4))
+        ttk.Label(status, text="現在の処理:").grid(
+            row=detail_row + 1, column=0, sticky="ne", padx=4, pady=3
+        )
+        ttk.Label(
+            status, textvariable=self.values["current"], wraplength=850, justify="left"
+        ).grid(row=detail_row + 1, column=1, columnspan=5, sticky="ew", padx=4, pady=3)
+        for column in (1, 3, 5):
+            status.columnconfigure(column, weight=1)
 
         review = ttk.LabelFrame(self, text="REVIEW / DENY", padding=6)
         review.pack(fill="both", expand=True)
-        self.tree = ttk.Treeview(review, columns=("state", "title", "reason"), show="headings")
+        self.tree = ttk.Treeview(
+            review, columns=("state", "title", "license", "reason"), show="headings"
+        )
         self.tree.heading("state", text="状態")
         self.tree.heading("title", text="ファイル")
+        self.tree.heading("license", text="ライセンス")
         self.tree.heading("reason", text="理由")
         self.tree.column("state", width=75, stretch=False)
-        self.tree.column("title", width=280)
-        self.tree.column("reason", width=500)
+        self.tree.column("title", width=260)
+        self.tree.column("license", width=150)
+        self.tree.column("reason", width=390)
         scroll = ttk.Scrollbar(review, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -153,7 +170,28 @@ class App(ttk.Frame):
             self.start_button.configure(state="normal")
             self.values["current"].set("安全に停止しました")
             return
-        self.values["current"].set(f"{event.get('stage', '')}: {event.get('current', '')}")
+        self.values["current"].set(format_progress(event))
+        done, total = event.get("done"), event.get("total")
+        if isinstance(done, (int, float)) and isinstance(total, (int, float)) and total > 0:
+            percent = min(100.0, max(0.0, done / total * 100))
+            self.progressbar.configure(value=percent)
+            self.values["stage_progress"].set(f"{percent:.1f}%")
+            elapsed = event.get("elapsed")
+            if isinstance(elapsed, (int, float)) and 0 < done < total:
+                rate = event.get("rate")
+                if isinstance(rate, (int, float)) and rate > 0 and event.get("unit") != "bytes":
+                    eta = (total - done) / rate
+                elif not event.get("processed"):
+                    eta = elapsed * (total - done) / done
+                else:
+                    eta = None
+                self.values["eta"].set("-" if eta is None else f"約 {format_duration(eta)}")
+            else:
+                self.values["eta"].set("-")
+        else:
+            self.progressbar.configure(value=0)
+            self.values["stage_progress"].set("件数を計測中")
+            self.values["eta"].set("-")
         if "api_rate" in event:
             self.values["api_rate"].set(f"{event['api_rate']:.2f} images/s")
         if "dl_mbps" in event:
@@ -169,7 +207,7 @@ class App(ttk.Frame):
         self.tree.delete(*self.tree.get_children())
         with self.pipeline.db.connect() as conn:
             rows = conn.execute(
-                "SELECT classification,dump_title,classification_reason FROM images "
+                "SELECT classification,dump_title,license_short_name,classification_reason FROM images "
                 "WHERE classification IN ('REVIEW','DENY') ORDER BY id LIMIT ? OFFSET ?",
                 (self.PAGE_SIZE, self.review_page * self.PAGE_SIZE),
             ).fetchall()

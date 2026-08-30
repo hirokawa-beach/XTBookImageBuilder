@@ -159,7 +159,9 @@ GUIでは次の情報を確認できます。
 - ALLOW / REVIEW / DENY件数
 - ダウンロード・JPEG変換進捗
 - API速度・ダウンロード速度
-- ディスク空き容量と現在の処理
+- ステージごとの件数・割合・残り時間の目安
+- Dump解析の読取率・走査行数・発見画像数
+- ディスク空き容量と現在処理中のファイル
 - REVIEW / DENY画像と判定理由
 
 開始、一時停止、再開、安全な停止に対応しています。長時間処理はTkinterのmain threadとは別のworker threadで実行されます。
@@ -191,7 +193,13 @@ python -m jawikiimg fetch-dumps --date YYYYMMDD
 python -m jawikiimg --workdir /path/to/jawikiimg-work all --limit 100
 ```
 
-CLIの進捗は1行1 JSONで標準出力へ出力されます。
+CLIでは、処理名、進捗率、処理件数、速度、経過時間、残り時間の目安を表示します。端末上では同じ進捗行を更新するため、長時間処理でもログが埋まりません。
+
+機械処理向けに従来の1行1 JSONが必要な場合は、subcommandより前に`--json-progress`を指定します。
+
+```sh
+python -m jawikiimg --json-progress all --limit 100
+```
 
 ## 中断と再開
 
@@ -218,7 +226,7 @@ CLIの進捗は1行1 JSONで標準出力へ出力されます。
 | `REVIEW` | 収録せず、人による確認対象 |
 | `DENY` | 収録しない |
 
-未対応ライセンス、GFDL、複数ライセンスの曖昧さ、metadataの矛盾、`Permission`や`Restrictions`の特殊条件は`REVIEW`になります。`NonFree=true`およびNC/ND条件は`DENY`になります。
+未対応ライセンス、GFDL、複数ライセンスの曖昧さ、metadataの矛盾、未知または警告を含む`Permission`、`Restrictions`の特殊条件は`REVIEW`になります。Flickrのライセンス確認、対応ライセンスと一致する帰属指定、米国連邦政府著作物のPublic Domain説明、vector版の利用推奨など、既知の非制限的な`Permission`は機械的に確認してALLOWできます。`NonFree=true`およびNC/ND条件は`DENY`になります。
 
 取得した`extmetadata`とAPI responseはSQLiteに保存されるため、後から判定根拠を確認できます。
 
@@ -253,7 +261,7 @@ Example.svg → Example.svg.jpg
 - `review.csv`
 - `errors.csv`
 
-`ATTRIBUTION.html`と`licenses.csv`では、元ファイル名、作者またはAttribution、ライセンス名、ライセンスURL、Wikimedia description URLを確認できます。大量データを扱えるよう、帰属情報とreportは全件をRAMへ載せずstreaming生成します。
+`ATTRIBUTION.html`と`licenses.csv`では、元ファイル名、作者またはAttribution、ライセンス名、ライセンスURL、Wikimedia description URLを確認できます。`review.csv`にも同じ判断材料に加えて、Permission、Restrictions、判定理由を保存します。大量データを扱えるよう、帰属情報とreportは全件をRAMへ載せずstreaming生成します。
 
 ## テスト
 

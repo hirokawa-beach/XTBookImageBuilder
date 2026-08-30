@@ -48,6 +48,13 @@ INSERT INTO `imagelinks` VALUES (1,1,10),(2,0,10),(3,0,11),(4,0,12),(5,0,13);
             with db.connect() as conn:
                 titles = [row[0] for row in conn.execute("SELECT dump_title FROM images ORDER BY id")]
             self.assertEqual(titles, ["First.png", "Second.jpg"])
+            events = []
+            found = extract_images(settings, db, Control(), limit=3, progress=events.append)
+            self.assertEqual(found, 3)
+            self.assertTrue(any(
+                event.get("phase") == "linktarget" and event.get("status") == "reused"
+                for event in events
+            ))
 
 
 if __name__ == "__main__":

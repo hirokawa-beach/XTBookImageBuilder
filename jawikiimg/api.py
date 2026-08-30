@@ -40,12 +40,19 @@ class MetadataFetcher:
     def run(self, progress: ProgressCallback = null_progress) -> int:
         self.settings.validate(network=True)
         with self.db.connect() as conn:
-            total = int(conn.execute(
-                "SELECT COUNT(*) FROM images WHERE metadata_status!='done'"
+            total = int(conn.execute("SELECT COUNT(*) FROM images").fetchone()[0])
+            completed_before = int(conn.execute(
+                "SELECT COUNT(*) FROM images WHERE metadata_status='done'"
             ).fetchone()[0])
-        done = 0
+        processed = 0
         started = time.monotonic()
         last_id = 0
+        progress({
+            "stage": "metadata", "phase": "api", "current": "metadata取得を開始",
+            "done": completed_before, "total": total, "unit": "items",
+            "status": "reused" if completed_before == total else "running",
+            "message": f"完了済み{completed_before}件を再利用" if completed_before else None,
+        })
         while True:
             with self.db.connect() as conn:
                 batch = conn.execute(
@@ -80,13 +87,22 @@ class MetadataFetcher:
                         [(str(exc), int(row["id"])) for row in batch],
                     )
                 raise
-            done += len(batch)
+            processed += len(batch)
             elapsed = max(0.001, time.monotonic() - started)
             progress({
-                "stage": "metadata", "done": done, "total": total,
-                "api_rate": done / elapsed, "current": titles[-1],
+                "stage": "metadata", "phase": "api",
+                "done": completed_before + processed, "total": total, "unit": "items",
+                "processed": processed, "api_rate": processed / elapsed,
+                "rate": processed / elapsed, "rate_unit": "items/s",
+                "elapsed": elapsed, "current": titles[-1],
             })
-        return done
+        progress({
+            "stage": "metadata", "phase": "api", "current": "metadata取得完了",
+            "done": completed_before + processed, "total": total, "unit": "items",
+            "processed": processed, "elapsed": max(0.001, time.monotonic() - started),
+            "status": "done" if processed else "reused",
+        })
+        return processed
 
     def _store_batch(self, requested, payload):
         normalized = {item["from"]: item["to"] for item in payload.get("query", {}).get("normalized", [])}
@@ -131,18 +147,42 @@ class MetadataFetcher:
 
 
 def classify_pending(db: Database, control: Control, progress: ProgressCallback = null_progress) -> int:
-    from .license import classify
+    from .license import LICENSE_POLICY_VERSION, classify
+
+    policy_key = "license_policy_version"
+    policy_changed = db.get_state(policy_key) != LICENSE_POLICY_VERSION
+    if policy_changed:
+        # Re-evaluate old results once when the rules change.  Storing the new
+        # version immediately makes an interrupted pass resumable.
+        with db.transaction() as conn:
+            conn.execute(
+                "UPDATE images SET classification=NULL,classification_reason=NULL "
+                "WHERE metadata_status='done' AND extmetadata_json IS NOT NULL"
+            )
+        db.set_state(policy_key, LICENSE_POLICY_VERSION)
 
     with db.connect() as conn:
         total = int(conn.execute(
-            "SELECT COUNT(*) FROM images WHERE metadata_status='done' AND classification IS NULL"
+            "SELECT COUNT(*) FROM images WHERE metadata_status='done' AND extmetadata_json IS NOT NULL"
+        ).fetchone()[0])
+        completed_before = int(conn.execute(
+            "SELECT COUNT(*) FROM images WHERE metadata_status='done' AND extmetadata_json IS NOT NULL "
+            "AND classification IS NOT NULL"
         ).fetchone()[0])
     done, last_id = 0, 0
+    started = time.monotonic()
+    progress({
+        "stage": "classify", "phase": "license", "current": "ライセンス判定を開始",
+        "done": completed_before, "total": total, "unit": "items",
+        "status": "reused" if completed_before == total else "running",
+        "message": "判定規則の更新により既存metadataを再判定" if policy_changed else None,
+    })
     while True:
         with db.connect() as conn:
             rows = conn.execute(
                 "SELECT id,extmetadata_json FROM images WHERE metadata_status='done' "
-                "AND classification IS NULL AND id>? ORDER BY id LIMIT 5000", (last_id,),
+                "AND extmetadata_json IS NOT NULL AND classification IS NULL "
+                "AND id>? ORDER BY id LIMIT 5000", (last_id,),
             ).fetchall()
         if not rows:
             break
@@ -157,5 +197,17 @@ def classify_pending(db: Database, control: Control, progress: ProgressCallback 
                     (decision.state, decision.reason, row["id"]),
                 )
                 done += 1
-            progress({"stage": "classify", "done": done, "total": total})
-    return total
+            elapsed = max(0.001, time.monotonic() - started)
+            progress({
+                "stage": "classify", "phase": "license", "current": "ライセンスを判定中",
+                "done": completed_before + done, "total": total, "unit": "items",
+                "processed": done, "rate": done / elapsed, "rate_unit": "items/s",
+                "elapsed": elapsed,
+            })
+    progress({
+        "stage": "classify", "phase": "license", "current": "ライセンス判定完了",
+        "done": completed_before + done, "total": total, "unit": "items",
+        "processed": done, "elapsed": max(0.001, time.monotonic() - started),
+        "status": "done" if done else "reused",
+    })
+    return done

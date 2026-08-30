@@ -1,4 +1,5 @@
 from pathlib import Path
+import gzip
 import tempfile
 import unittest
 
@@ -47,7 +48,19 @@ INSERT INTO `imagelinks` VALUES (4,'Old\\_name.png',0);
             row = next(iter_table_rows(path, "imagelinks"))
         self.assertEqual(row["il_to"], "Old_name.png")
 
+    def test_reports_input_byte_progress(self):
+        sql = """CREATE TABLE `sample` (\n `id` int NOT NULL\n);\nINSERT INTO `sample` VALUES (1),(2);\n"""
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "sample.sql.gz"
+            with gzip.open(path, "wt", encoding="utf-8") as fh:
+                fh.write(sql)
+            size = path.stat().st_size
+            events = []
+            rows = list(iter_table_rows(path, "sample", lambda done, total: events.append((done, total))))
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(events)
+        self.assertEqual(events[-1], (size, size))
+
 
 if __name__ == "__main__":
     unittest.main()
-

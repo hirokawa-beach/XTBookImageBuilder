@@ -28,12 +28,21 @@ class MediaDownloader:
         params = tuple(sorted(ALLOW_STATES))
         with self.db.connect() as conn:
             total = int(conn.execute(
+                f"SELECT COUNT(*) FROM images WHERE classification IN ({placeholders})", params,
+            ).fetchone()[0])
+            completed_before = int(conn.execute(
                 f"SELECT COUNT(*) FROM images WHERE classification IN ({placeholders}) "
-                "AND download_status!='done'", params,
+                "AND download_status='done'", params,
             ).fetchone()[0])
         started = time.monotonic()
         done = 0
         last_id = 0
+        progress({
+            "stage": "download", "phase": "media", "current": "画像取得を開始",
+            "done": completed_before, "total": total, "unit": "items",
+            "status": "reused" if completed_before == total else "running",
+            "message": f"完了済み{completed_before}件を再利用" if completed_before else None,
+        })
         while True:
             with self.db.connect() as conn:
                 rows = conn.execute(
@@ -52,10 +61,21 @@ class MediaDownloader:
                     done += 1
                     elapsed = max(0.001, time.monotonic() - started)
                     progress({
-                        "stage": "download", "done": done, "total": total,
+                        "stage": "download", "phase": "media",
+                        "done": completed_before + done, "total": total, "unit": "items",
+                        "processed": done,
                         "dl_mbps": self.bytes_total * 8 / elapsed / 1_000_000,
+                        "rate": done / elapsed, "rate_unit": "items/s", "elapsed": elapsed,
                         "current": futures[future]["dump_title"],
                     })
+        progress({
+            "stage": "download", "phase": "media", "current": "画像取得完了",
+            "done": completed_before + done, "total": total, "unit": "items",
+            "processed": done,
+            "dl_mbps": self.bytes_total * 8 / max(0.001, time.monotonic() - started) / 1_000_000,
+            "elapsed": max(0.001, time.monotonic() - started),
+            "status": "done" if done else "reused",
+        })
         return done
 
     def _one(self, row: dict) -> None:

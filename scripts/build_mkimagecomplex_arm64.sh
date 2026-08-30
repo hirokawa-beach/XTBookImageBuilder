@@ -6,6 +6,7 @@ revision="52f702cbd6635d9f91a7ead6641401acaf0e832d"
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_dir="$root/tools/MkXTBWikiplexus-src"
 output="$root/tools/MkImageComplex-bin"
+compat_dir="$root/scripts/mkimagecomplex-compat"
 
 arch=$(uname -m)
 if [ "$arch" != "aarch64" ] && [ "$arch" != "arm64" ]; then
@@ -23,9 +24,13 @@ git -C "$source_dir" fetch --depth 1 origin "$revision"
 git -C "$source_dir" checkout --detach "$revision"
 
 mkdir -p "$root/tools"
-# Build only MkImageComplex: MeCab, KAKASI and liblzma are unnecessary.
+# MkImageComplex includes the old project's precompiled headers, which pull in
+# MeCab even though this target never uses it.  The compatibility include also
+# supplies standard C++ headers that some translation units assumed the Xcode
+# precompiled header had already loaded.
 g++ -std=c++11 -O3 -DNDEBUG -D_LARGEFILE_SOURCE=1 -D_LARGEFILE64_SOURCE=1 \
   -D_FILE_OFFSET_BITS=64 -DJPGD_USE_SSE2=0 \
+  -I"$compat_dir" -include "$compat_dir/preinclude.hpp" \
   $(pkg-config --cflags libxml-2.0) \
   "$source_dir/MkImageComplex/main.cpp" \
   "$source_dir/MkXTBWikiplexus/XTBDicDB.cpp" \
@@ -34,4 +39,3 @@ g++ -std=c++11 -O3 -DNDEBUG -D_LARGEFILE_SOURCE=1 -D_LARGEFILE64_SOURCE=1 \
   $(pkg-config --libs libxml-2.0) -o "$output"
 chmod +x "$output"
 echo "built: $output"
-

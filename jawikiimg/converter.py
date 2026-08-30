@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import os
+import time
 
 from PIL import Image, ImageOps
 
@@ -56,9 +57,19 @@ class Converter:
         self.settings.ensure_dirs()
         with self.db.connect() as conn:
             total = int(conn.execute(
-                "SELECT COUNT(*) FROM images WHERE download_status='done' AND convert_status!='done'"
+                "SELECT COUNT(*) FROM images WHERE download_status='done'"
             ).fetchone()[0])
+            completed_before = int(conn.execute(
+                "SELECT COUNT(*) FROM images WHERE download_status='done' AND convert_status='done'"
+            ).fetchone()[0])
+        started = time.monotonic()
         done, last_id = 0, 0
+        progress({
+            "stage": "convert", "phase": "jpeg", "current": "JPEG変換を開始",
+            "done": completed_before, "total": total, "unit": "items",
+            "status": "reused" if completed_before == total else "running",
+            "message": f"変換済み{completed_before}件を再利用" if completed_before else None,
+        })
         while True:
             with self.db.connect() as conn:
                 rows = conn.execute(
@@ -74,10 +85,20 @@ class Converter:
                     self.control.checkpoint()
                     future.result()
                     done += 1
+                    elapsed = max(0.001, time.monotonic() - started)
                     progress({
-                        "stage": "convert", "done": done, "total": total,
+                        "stage": "convert", "phase": "jpeg",
+                        "done": completed_before + done, "total": total, "unit": "items",
+                        "processed": done, "rate": done / elapsed,
+                        "rate_unit": "items/s", "elapsed": elapsed,
                         "current": futures[future]["dump_title"],
                     })
+        progress({
+            "stage": "convert", "phase": "jpeg", "current": "JPEG変換完了",
+            "done": completed_before + done, "total": total, "unit": "items",
+            "processed": done, "elapsed": max(0.001, time.monotonic() - started),
+            "status": "done" if done else "reused",
+        })
         return done
 
     def _one(self, row: dict) -> None:

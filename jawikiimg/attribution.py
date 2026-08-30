@@ -53,8 +53,14 @@ th,td{{border:1px solid #aaa;padding:.35rem;text-align:left;vertical-align:top}}
 
 
 def write_report(db: Database, output_dir: Path, snapshot_date: str) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
     counts = db.counts()
-    review_fields = ("dump_title", "classification", "classification_reason")
+    review_fields = (
+        "dump_title", "canonical_title", "classification", "classification_reason",
+        "license_short_name", "license_url", "artist", "attribution", "credit",
+        "description_url", "attribution_required", "copyrighted", "non_free",
+        "permission", "restrictions_text",
+    )
     error_fields = ("dump_title", "metadata_status", "download_status", "convert_status", "error")
     with (output_dir / "review.csv").open("w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=review_fields)

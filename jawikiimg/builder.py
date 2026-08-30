@@ -4,6 +4,7 @@ from pathlib import Path
 import plistlib
 import shutil
 import subprocess
+import time
 
 from .attribution import write_attribution, write_report
 from .config import Settings
@@ -65,7 +66,11 @@ def build_dictionary(
     binary = find_mkimagecomplex(settings)
     bundle = settings.output_dir / f"jawikiimg-{snapshot}.xtbdict"
     bundle.mkdir(parents=True, exist_ok=True)
-    progress({"stage": "build", "current": "MkImageComplex-bin", "total": converted_count})
+    started = time.monotonic()
+    progress({
+        "stage": "build", "phase": "pack", "current": "画像を辞書へ登録",
+        "done": 0, "total": converted_count, "unit": "items",
+    })
     process = subprocess.Popen(
         [binary, "-o", str(bundle.resolve())], stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8",
@@ -81,8 +86,18 @@ def build_dictionary(
                 control.checkpoint()
                 if index % 1000 == 0:
                     check_free_space(bundle, settings.minimum_free_gib)
+                    elapsed = max(0.001, time.monotonic() - started)
+                    progress({
+                        "stage": "build", "phase": "pack", "current": "画像を辞書へ登録",
+                        "done": index, "total": converted_count, "unit": "items",
+                        "rate": index / elapsed, "rate_unit": "items/s", "elapsed": elapsed,
+                    })
                 process.stdin.write(str(Path(row["jpeg_path"]).resolve()) + "\n")
         process.stdin.close()
+        progress({
+            "stage": "build", "phase": "index", "current": "索引ファイルを書き込み中",
+            "done": converted_count, "total": converted_count, "unit": "items",
+        })
         stderr = process.stderr.read() if process.stderr else ""
         code = process.wait()
     except BaseException:
@@ -91,10 +106,16 @@ def build_dictionary(
         raise
     if code:
         raise RuntimeError(f"MkImageComplex-bin exited {code}: {stderr[-4000:]}")
+    progress({"stage": "build", "phase": "report", "current": "Info.plist・帰属情報を作成"})
     with (bundle / "Info.plist").open("wb") as fh:
         plistlib.dump(info_plist(), fh, fmt=plistlib.FMT_XML, sort_keys=False)
     write_attribution(db, bundle, snapshot)
     write_report(db, bundle, snapshot)
     db.set_state("build_complete", str(bundle))
-    progress({"stage": "build", "current": "done", "bundle": str(bundle)})
+    progress({
+        "stage": "build", "phase": "report", "current": "辞書生成完了",
+        "done": converted_count, "total": converted_count, "unit": "items",
+        "elapsed": max(0.001, time.monotonic() - started), "status": "done",
+        "bundle": str(bundle),
+    })
     return bundle

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import gzip
 import io
 from pathlib import Path
@@ -109,11 +109,25 @@ def _open_text(path: Path):
     return io.TextIOWrapper(raw, encoding="utf-8", errors="surrogateescape", newline="")
 
 
-def iter_table_rows(path: Path, table: str) -> Iterator[dict[str, object]]:
+def _input_position(fh: io.TextIOWrapper) -> int:
+    binary = fh.buffer
+    if isinstance(binary, gzip.GzipFile) and binary.fileobj is not None:
+        return binary.fileobj.tell()
+    return binary.tell()
+
+
+def iter_table_rows(
+    path: Path,
+    table: str,
+    byte_progress: Callable[[int, int], None] | None = None,
+) -> Iterator[dict[str, object]]:
     columns: list[str] = []
     in_create = False
+    total_bytes = path.stat().st_size
     with _open_text(path) as fh:
         for line_no, line in enumerate(fh, 1):
+            if byte_progress:
+                byte_progress(min(_input_position(fh), total_bytes), total_bytes)
             if re.match(rf"^CREATE TABLE\s+`{re.escape(table)}`", line, re.IGNORECASE):
                 in_create = True
                 columns = []
@@ -143,4 +157,5 @@ def iter_table_rows(path: Path, table: str) -> Iterator[dict[str, object]]:
                         f"{len(row_columns)} != {len(values)}"
                     )
                 yield dict(zip(row_columns, values))
-
+        if byte_progress:
+            byte_progress(total_bytes, total_bytes)
