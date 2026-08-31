@@ -12,7 +12,8 @@ from .license import ALLOW_STATES
 FIELDS = (
     "dump_title", "canonical_title", "artist", "attribution", "credit",
     "license_short_name", "license_url", "description_url", "sha1", "mime",
-    "classification", "classification_reason",
+    "classification", "classification_reason", "manual_override", "manual_note",
+    "manual_updated_at",
 )
 
 
@@ -59,7 +60,8 @@ def write_report(db: Database, output_dir: Path, snapshot_date: str) -> Path:
         "dump_title", "canonical_title", "classification", "classification_reason",
         "license_short_name", "license_url", "artist", "attribution", "credit",
         "description_url", "attribution_required", "copyrighted", "non_free",
-        "permission", "restrictions_text",
+        "permission", "restrictions_text", "manual_override", "manual_note",
+        "manual_updated_at",
     )
     error_fields = ("dump_title", "metadata_status", "download_status", "convert_status", "error")
     with (output_dir / "review.csv").open("w", encoding="utf-8-sig", newline="") as fh:
@@ -68,7 +70,7 @@ def write_report(db: Database, output_dir: Path, snapshot_date: str) -> Path:
         with db.connect() as conn:
             writer.writerows(dict(row) for row in conn.execute(
                 f"SELECT {','.join(review_fields)} FROM images "
-                "WHERE classification IN ('REVIEW','DENY') ORDER BY id"
+                "WHERE classification IN ('REVIEW','DENY') OR manual_override IS NOT NULL ORDER BY id"
             ))
     with (output_dir / "errors.csv").open("w", encoding="utf-8-sig", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=error_fields)
@@ -85,7 +87,11 @@ def write_report(db: Database, output_dir: Path, snapshot_date: str) -> Path:
         "review_and_deny_file": "review.csv",
         "errors_file": "errors.csv",
         "error_count": error_count,
-        "policy": {"automatic_allow": sorted(ALLOW_STATES), "review_and_deny_downloaded": False},
+        "policy": {
+            "automatic_allow": sorted(ALLOW_STATES),
+            "review_and_deny_downloaded": False,
+            "manual_overrides_audited_in_csv": True,
+        },
     }
     path = output_dir / "report.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -20,7 +20,8 @@ class AttributionReportTests(unittest.TestCase):
                     license_short_name='CC BY 4.0',
                     license_url='https://creativecommons.org/licenses/by/4.0/',
                     artist='Example Artist',description_url='https://commons.wikimedia.org/example',
-                    permission='See below',restrictions_text='Trademark'"""
+                    permission='See below',restrictions_text='Trademark',manual_override='DENY',
+                    manual_note='confirmed by reviewer',manual_updated_at='2026-08-30 12:00:00'"""
                 )
             write_report(db, root / "report", "20260801")
             with (root / "report" / "review.csv").open(encoding="utf-8-sig", newline="") as fh:
@@ -30,6 +31,8 @@ class AttributionReportTests(unittest.TestCase):
             self.assertEqual(rows[0]["artist"], "Example Artist")
             self.assertEqual(rows[0]["permission"], "See below")
             self.assertEqual(rows[0]["restrictions_text"], "Trademark")
+            self.assertEqual(rows[0]["manual_override"], "DENY")
+            self.assertEqual(rows[0]["manual_note"], "confirmed by reviewer")
 
 
 if __name__ == "__main__":

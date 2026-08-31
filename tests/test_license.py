@@ -15,47 +15,22 @@ class LicenseTests(unittest.TestCase):
         self.assertEqual(classify(ext(LicenseShortName="CC BY-SA 4.0", Copyrighted="true")).state, "ALLOW_CC_BY_SA")
 
     def test_deny_non_free_nc_and_nd(self):
-        self.assertEqual(classify(ext(LicenseShortName="Fair use", NonFree="true")).state, "DENY")
+        self.assertEqual(classify(ext(LicenseShortName="Fair use")).state, "DENY")
         self.assertEqual(classify(ext(LicenseShortName="CC BY-NC 4.0")).state, "DENY")
         self.assertEqual(classify(ext(LicenseShortName="CC BY-ND 4.0")).state, "DENY")
-        self.assertEqual(
-            classify(ext(LicenseShortName="CC BY 4.0", Permission="Non-commercial use only")).state,
-            "DENY",
-        )
 
-    def test_review_unknown_multiple_special_and_contradiction(self):
+    def test_review_only_missing_or_unsupported_name(self):
         self.assertEqual(classify({}).state, "REVIEW")
         self.assertEqual(classify(ext(LicenseShortName="GFDL 1.2")).state, "REVIEW")
-        self.assertEqual(classify(ext(LicenseShortName="CC BY-SA 4.0 / GFDL")).state, "REVIEW")
-        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", Permission="Contact author")).state, "REVIEW")
-        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", Copyrighted="false")).state, "REVIEW")
+        self.assertEqual(classify(ext(LicenseUrl="https://creativecommons.org/licenses/by/4.0/")).state, "REVIEW")
 
-    def test_known_non_restrictive_permission_is_allowed(self):
-        flickr = (
-            "This image was originally posted to Flickr. On that date, it was "
-            "confirmed to be licensed under the terms of CC BY 2.0."
-        )
-        federal = (
-            "This work is in the public domain in the United States because it was "
-            "prepared by an employee of the U.S. federal government as part of official duties."
-        )
-        vector = "A vector version of this image is available and should be used instead."
-        attribution = (
-            "This work is licensed under Creative Commons Attribution 4.0. "
-            "Please attribute Tokyo Metropolitan Government."
-        )
-        self.assertEqual(classify(ext(LicenseShortName="CC BY 2.0", Permission=flickr)).state, "ALLOW_CC_BY")
-        self.assertEqual(classify(ext(LicenseShortName="Public domain", Permission=federal)).state, "ALLOW_PD")
-        self.assertEqual(classify(ext(LicenseShortName="CC BY-SA 4.0", Permission=vector)).state, "ALLOW_CC_BY_SA")
-        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", Permission=attribution)).state, "ALLOW_CC_BY")
-
-    def test_permission_warning_unknown_and_restrictions_stay_review(self):
+    def test_other_metadata_does_not_change_supported_license_name(self):
         warning = "Please provide the source and publication date; this may still be copyrighted."
-        self.assertEqual(classify(ext(LicenseShortName="Public domain", Permission=warning)).state, "REVIEW")
-        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", Permission="See below")).state, "REVIEW")
-        decision = classify(ext(LicenseShortName="Public domain", Restrictions="Trademarked emblem"))
-        self.assertEqual(decision.state, "REVIEW")
-        self.assertIn("Trademarked emblem", decision.reason)
+        self.assertEqual(classify(ext(LicenseShortName="Public domain", Permission=warning)).state, "ALLOW_PD")
+        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", Restrictions="Trademarked")).state, "ALLOW_CC_BY")
+        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", Copyrighted="false")).state, "ALLOW_CC_BY")
+        self.assertEqual(classify(ext(LicenseShortName="CC BY 4.0", NonFree="true")).state, "ALLOW_CC_BY")
+        self.assertEqual(classify(ext(LicenseShortName="CC BY-SA 4.0 / GFDL")).state, "ALLOW_CC_BY_SA")
 
 
 if __name__ == "__main__":

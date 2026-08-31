@@ -29,8 +29,8 @@
 
 - 日本語Wikipediaの公式`imagelinks.sql.gz`と`linktarget.sql.gz`から、標準記事で使われている画像を抽出
 - Public Domain、CC0、CC BY、CC BY-SAだけを自動収録
-- 不明・未対応・矛盾・特殊条件のある画像は`REVIEW`へ分類
-- `NonFree=true`、NC、NDなどは`DENY`へ分類
+- ライセンス名が不明または未対応の画像は`REVIEW`へ分類
+- ライセンス名にNC、ND、Fair useなどが含まれる画像は`DENY`へ分類
 - ライセンス判定後にのみWikimediaのサムネイルをダウンロード
 - XTBook向けにJPEG quality 85、最大800×480へ変換
 - SQLiteによる進捗保存と中断・再開
@@ -162,9 +162,12 @@ GUIでは次の情報を確認できます。
 - ステージごとの件数・割合・残り時間の目安
 - Dump解析の読取率・走査行数・発見画像数
 - ディスク空き容量と現在処理中のファイル
-- REVIEW / DENY画像と判定理由
+- REVIEW / DENY画像と判定理由・ライセンス・Permission・Restrictions
+- REVIEW画像の手動承認、手動DENY、手動判定の解除
 
 開始、一時停止、再開、安全な停止に対応しています。長時間処理はTkinterのmain threadとは別のworker threadで実行されます。
+
+手動承認は対応ライセンスを特定できる`REVIEW`画像に限られます。`DENY`画像や未対応ライセンスは承認できません。承認状態、確認メモ、日時はSQLiteとCSVへ保存され、自動再判定でも上書きされません。手動承認後は処理を再開すると、その画像のダウンロード・変換・辞書収録が行われます。
 
 ## CLI
 
@@ -226,7 +229,7 @@ python -m jawikiimg --json-progress all --limit 100
 | `REVIEW` | 収録せず、人による確認対象 |
 | `DENY` | 収録しない |
 
-未対応ライセンス、GFDL、複数ライセンスの曖昧さ、metadataの矛盾、未知または警告を含む`Permission`、`Restrictions`の特殊条件は`REVIEW`になります。Flickrのライセンス確認、対応ライセンスと一致する帰属指定、米国連邦政府著作物のPublic Domain説明、vector版の利用推奨など、既知の非制限的な`Permission`は機械的に確認してALLOWできます。`NonFree=true`およびNC/ND条件は`DENY`になります。
+判定にはWikimedia metadataの`LicenseShortName`だけを使用します。Public Domain、CC0、CC BY、CC BY-SAを含むライセンス名はALLOW、NC・ND・Fair useなどの非自由ライセンス名はDENY、欠損または未対応ライセンス名はREVIEWになります。`Permission`、`Restrictions`、`Copyrighted`、`NonFree`などの他のmetadataは判定を変更せず、確認用としてSQLiteとCSVへ保存します。複数ライセンス名に対応ライセンスが含まれる場合は、その対応ライセンスを選んでALLOWします。
 
 取得した`extmetadata`とAPI responseはSQLiteに保存されるため、後から判定根拠を確認できます。
 

@@ -157,7 +157,8 @@ def classify_pending(db: Database, control: Control, progress: ProgressCallback 
         with db.transaction() as conn:
             conn.execute(
                 "UPDATE images SET classification=NULL,classification_reason=NULL "
-                "WHERE metadata_status='done' AND extmetadata_json IS NOT NULL"
+                "WHERE metadata_status='done' AND extmetadata_json IS NOT NULL "
+                "AND manual_override IS NULL"
             )
         db.set_state(policy_key, LICENSE_POLICY_VERSION)
 
@@ -182,6 +183,7 @@ def classify_pending(db: Database, control: Control, progress: ProgressCallback 
             rows = conn.execute(
                 "SELECT id,extmetadata_json FROM images WHERE metadata_status='done' "
                 "AND extmetadata_json IS NOT NULL AND classification IS NULL "
+                "AND manual_override IS NULL "
                 "AND id>? ORDER BY id LIMIT 5000", (last_id,),
             ).fetchall()
         if not rows:

@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS images (
     metadata_status TEXT NOT NULL DEFAULT 'pending',
     classification TEXT,
     classification_reason TEXT,
+    manual_override TEXT,
+    manual_note TEXT,
+    manual_updated_at TEXT,
     download_status TEXT NOT NULL DEFAULT 'pending',
     download_path TEXT,
     download_bytes INTEGER,
@@ -89,6 +92,19 @@ class Database:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add columns introduced after the first public database schema."""
+        columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(images)")}
+        for name, declaration in (
+            ("manual_override", "TEXT"),
+            ("manual_note", "TEXT"),
+            ("manual_updated_at", "TEXT"),
+        ):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE images ADD COLUMN {name} {declaration}")
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=60, factory=ClosingConnection)
@@ -145,6 +161,8 @@ class Database:
                 "ALLOW_CC_BY_SA": "classification='ALLOW_CC_BY_SA'",
                 "REVIEW": "classification='REVIEW'",
                 "DENY": "classification='DENY'",
+                "manual_approved": "manual_override LIKE 'ALLOW_%'",
+                "manual_denied": "manual_override='DENY'",
                 "downloaded": "download_status='done'",
                 "converted": "convert_status='done'",
             }.items():

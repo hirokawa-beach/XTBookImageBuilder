@@ -4,10 +4,12 @@ from queue import Empty, Queue
 from threading import Thread
 import shutil
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, simpledialog, ttk
+import webbrowser
 
 from .config import Settings
 from .control import Control, StopRequested
+from .manual_review import approve_reviews, clear_manual_decisions, deny_reviews
 from .pipeline import Pipeline
 from .progress import format_duration, format_progress
 
@@ -23,6 +25,7 @@ class App(ttk.Frame):
         self.events: Queue = Queue()
         self.worker: Thread | None = None
         self.review_page = 0
+        self.review_rows: dict[int, dict] = {}
         self.values = {key: tk.StringVar(value="-") for key in (
             "snapshot", "found", "metadata", "allow", "review", "deny", "download",
             "convert", "api_rate", "dl_rate", "disk", "stage_progress", "eta", "current",
@@ -72,7 +75,7 @@ class App(ttk.Frame):
         for column in (1, 3, 5):
             status.columnconfigure(column, weight=1)
 
-        review = ttk.LabelFrame(self, text="REVIEW / DENY", padding=6)
+        review = ttk.LabelFrame(self, text="REVIEW / DENY / 手動判定", padding=6)
         review.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(
             review, columns=("state", "title", "license", "reason"), show="headings"
@@ -89,12 +92,26 @@ class App(ttk.Frame):
         self.tree.configure(yscrollcommand=scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="left", fill="y")
+        self.tree.bind("<<TreeviewSelect>>", self._show_review_detail)
+        self.tree.bind("<Double-1>", lambda _event: self._open_description())
         pager = ttk.Frame(self)
         pager.pack(fill="x")
         ttk.Button(pager, text="前へ", command=lambda: self._page(-1)).pack(side="left")
         ttk.Button(pager, text="次へ", command=lambda: self._page(1)).pack(side="left", padx=4)
         self.page_label = ttk.Label(pager, text="1")
         self.page_label.pack(side="left")
+        ttk.Button(pager, text="選択を手動承認", command=self._approve_selected).pack(side="left", padx=(18, 4))
+        ttk.Button(pager, text="選択を手動DENY", command=self._deny_selected).pack(side="left", padx=4)
+        ttk.Button(pager, text="手動判定を解除", command=self._clear_selected).pack(side="left", padx=4)
+        ttk.Button(pager, text="説明ページを開く", command=self._open_description).pack(side="left", padx=4)
+
+        detail = ttk.LabelFrame(self, text="選択画像の判断材料", padding=6)
+        detail.pack(fill="x", pady=(6, 0))
+        self.review_detail = tk.Text(detail, height=8, wrap="word")
+        detail_scroll = ttk.Scrollbar(detail, orient="vertical", command=self.review_detail.yview)
+        self.review_detail.configure(yscrollcommand=detail_scroll.set, state="disabled")
+        self.review_detail.pack(side="left", fill="both", expand=True)
+        detail_scroll.pack(side="left", fill="y")
         self._refresh_review()
 
     def start(self):
@@ -205,15 +222,130 @@ class App(ttk.Frame):
 
     def _refresh_review(self):
         self.tree.delete(*self.tree.get_children())
+        self.review_rows.clear()
         with self.pipeline.db.connect() as conn:
             rows = conn.execute(
-                "SELECT classification,dump_title,license_short_name,classification_reason FROM images "
-                "WHERE classification IN ('REVIEW','DENY') ORDER BY id LIMIT ? OFFSET ?",
+                """SELECT id,classification,dump_title,license_short_name,classification_reason,
+                manual_override,manual_note,license_url,description_url,artist,attribution,credit,
+                permission,restrictions_text FROM images
+                WHERE classification IN ('REVIEW','DENY') OR manual_override IS NOT NULL
+                ORDER BY id LIMIT ? OFFSET ?""",
                 (self.PAGE_SIZE, self.review_page * self.PAGE_SIZE),
             ).fetchall()
         for row in rows:
-            self.tree.insert("", "end", values=tuple(row))
+            data = dict(row)
+            image_id = int(data["id"])
+            self.review_rows[image_id] = data
+            state = data["classification"] + (" (手動)" if data["manual_override"] else "")
+            self.tree.insert(
+                "", "end", iid=str(image_id),
+                values=(state, data["dump_title"], data["license_short_name"], data["classification_reason"]),
+            )
         self.page_label.configure(text=str(self.review_page + 1))
+        self._set_review_detail("")
+
+    def _selected_review_ids(self) -> tuple[int, ...]:
+        return tuple(int(iid) for iid in self.tree.selection())
+
+    def _review_action_ready(self) -> bool:
+        if self.worker and self.worker.is_alive():
+            messagebox.showwarning("処理中", "処理を安全に停止してから手動判定してください。")
+            return False
+        if not self.tree.selection():
+            messagebox.showinfo("未選択", "画像を1件以上選択してください。")
+            return False
+        return True
+
+    def _approve_selected(self):
+        if not self._review_action_ready():
+            return
+        selected = self._selected_review_ids()
+        if not messagebox.askyesno(
+            "手動承認の確認",
+            f"選択した{len(selected)}件を辞書へ収録可能として承認します。\n"
+            "ライセンス、Permission、Restrictions、説明ページを確認しましたか？",
+        ):
+            return
+        note = simpledialog.askstring("確認メモ", "承認根拠または確認内容を入力してください（空欄可）:")
+        if note is None:
+            return
+        try:
+            count = approve_reviews(self.pipeline.db, selected, note)
+        except ValueError as exc:
+            messagebox.showerror("承認できません", str(exc))
+            return
+        self._refresh_review()
+        messagebox.showinfo(
+            "手動承認",
+            f"{count}件を手動承認しました。画像を収録するには、開始ボタンで処理を再開してください。",
+        )
+
+    def _deny_selected(self):
+        if not self._review_action_ready():
+            return
+        selected = self._selected_review_ids()
+        note = simpledialog.askstring("手動DENY", "収録しない理由を入力してください（空欄可）:")
+        if note is None:
+            return
+        try:
+            count = deny_reviews(self.pipeline.db, selected, note)
+        except ValueError as exc:
+            messagebox.showerror("手動DENYできません", str(exc))
+            return
+        self._refresh_review()
+        messagebox.showinfo("手動DENY", f"{count}件を手動DENYにしました。")
+
+    def _clear_selected(self):
+        if not self._review_action_ready():
+            return
+        selected = self._selected_review_ids()
+        if not messagebox.askyesno("手動判定を解除", f"選択した{len(selected)}件を自動判定へ戻しますか？"):
+            return
+        try:
+            count = clear_manual_decisions(self.pipeline.db, selected)
+        except ValueError as exc:
+            messagebox.showerror("解除できません", str(exc))
+            return
+        self._refresh_review()
+        messagebox.showinfo("手動判定を解除", f"{count}件を自動判定へ戻しました。")
+
+    def _show_review_detail(self, _event=None):
+        selected = self._selected_review_ids()
+        if not selected:
+            self._set_review_detail("")
+            return
+        row = self.review_rows.get(selected[0], {})
+        creator = row.get("attribution") or row.get("artist") or row.get("credit") or ""
+        lines = (
+            f"ファイル: {row.get('dump_title') or ''}",
+            f"状態: {row.get('classification') or ''}",
+            f"ライセンス: {row.get('license_short_name') or ''}",
+            f"ライセンスURL: {row.get('license_url') or ''}",
+            f"作者 / Attribution: {creator}",
+            f"判定理由: {row.get('classification_reason') or ''}",
+            f"Permission: {row.get('permission') or ''}",
+            f"Restrictions: {row.get('restrictions_text') or ''}",
+            f"説明ページ: {row.get('description_url') or ''}",
+            f"手動メモ: {row.get('manual_note') or ''}",
+        )
+        self._set_review_detail("\n".join(lines))
+
+    def _set_review_detail(self, value: str):
+        self.review_detail.configure(state="normal")
+        self.review_detail.delete("1.0", "end")
+        self.review_detail.insert("1.0", value)
+        self.review_detail.configure(state="disabled")
+
+    def _open_description(self):
+        selected = self._selected_review_ids()
+        if not selected:
+            messagebox.showinfo("未選択", "画像を1件選択してください。")
+            return
+        url = self.review_rows.get(selected[0], {}).get("description_url")
+        if not url:
+            messagebox.showinfo("URLなし", "Wikimediaの説明ページURLがありません。")
+            return
+        webbrowser.open(str(url))
 
     def _close(self):
         if self.worker and self.worker.is_alive():
@@ -226,6 +358,6 @@ class App(ttk.Frame):
 def run_gui(settings: Settings) -> None:
     root = tk.Tk()
     root.title("XTBook 日本語Wikipedia画像辞書ビルダー")
-    root.geometry("1050x680")
+    root.geometry("1150x820")
     App(root, settings)
     root.mainloop()
